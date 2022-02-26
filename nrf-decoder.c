@@ -182,13 +182,27 @@ uint8_t get_byte(const uint32_t startpos_samples)
 
 bool check_for_preamble(void) //preamble can be 0x55 or 0xAA depending on address
 {
-	if(ringbuffer_get_sample_at_pos(0)==0 && ringbuffer_get_sample_at_pos(4+0*samples_per_bit)==0 && ringbuffer_get_sample_at_pos(4+1*samples_per_bit)==1 && ringbuffer_get_sample_at_pos(4+2*samples_per_bit)==0 && ringbuffer_get_sample_at_pos(4+3*samples_per_bit)==1 && ringbuffer_get_sample_at_pos(4+4*samples_per_bit)==0 && ringbuffer_get_sample_at_pos(4+5*samples_per_bit)==1 && ringbuffer_get_sample_at_pos(4+6*samples_per_bit)==0 && ringbuffer_get_sample_at_pos(4+7*samples_per_bit)==1)
-		return true;
-
-	if(ringbuffer_get_sample_at_pos(0)==1 && ringbuffer_get_sample_at_pos(4+0*samples_per_bit)==1 && ringbuffer_get_sample_at_pos(4+1*samples_per_bit)==0 && ringbuffer_get_sample_at_pos(4+2*samples_per_bit)==1 && ringbuffer_get_sample_at_pos(4+3*samples_per_bit)==0 && ringbuffer_get_sample_at_pos(4+4*samples_per_bit)==1 && ringbuffer_get_sample_at_pos(4+5*samples_per_bit)==0 && ringbuffer_get_sample_at_pos(4+6*samples_per_bit)==1 && ringbuffer_get_sample_at_pos(4+7*samples_per_bit)==0)
-		return true;
+	uint8_t i;
+	bool bit;
 	
-	return false;
+	if(ringbuffer_get_sample_at_pos(0)==0)
+	{
+		for(i=0, bit=0; i<8; i++, bit=!bit)
+		{
+			if(ringbuffer_get_sample_at_pos(samples_per_bit/2+i*samples_per_bit)!=bit)
+				return false;
+		}
+		return true;
+	}
+	else 
+	{
+		for(i=0, bit=1; i<8; i++, bit=!bit)
+		{
+			if(ringbuffer_get_sample_at_pos(samples_per_bit/2+i*samples_per_bit)!=bit)
+				return false;
+		}
+		return true;
+	}
 }
 
 void read_bytes(const uint32_t startpos_samples, const uint8_t nb, uint8_t * const dst)
