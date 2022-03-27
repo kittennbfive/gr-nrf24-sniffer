@@ -41,7 +41,7 @@ By default the decoder will not show all the packet details but only a summary a
 
 ## Some random notes/comments/...
 * Thanks to Nordic Semiconductor for describing the packet-format of their chips inside the public datasheets!
-* The cheap nRF24L01+ modules you can get from places like Aliexpress seem to contain fake chips, at least sometimes. From my limited experiments some of those modules are not transmitting exactly on the specified channel/frequency. Just use your SDR to check for this if you have trouble getting a (stable) wireless link.
+* The cheap nRF24L01+ modules you can get from places like Aliexpress seem to contain fake chips, at least sometimes. From my limited experiments some of those modules are not transmitting exactly on the specified channel/frequency. Just use your SDR to check for this if you have trouble getting a (stable) wireless link. There is a test mode (constant carrier) on the nRF24 as decribed in the datasheet (last page), it makes checking the frequency/channel really easy.
 * The decoder does not know the actual on air data rate, it only uses "samples per bit" (`--spb`) for which the correct number must be specified.
 * Note that the payload_length-field inside the PCF is only valid if dynamic payload length is enabled. This means there is no way to guess the payload-length of some random transmission, except by try and error while checking for correct CRC.
 * If you wonder about that big spike at the center of the spectrum-plot see explanations here: https://hackrf.readthedocs.io/en/latest/faq.html#what-is-the-big-spike-in-the-center-of-my-received-spectrum
