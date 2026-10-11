@@ -1,6 +1,7 @@
 options:
   parameters:
-    author: kittennbfive
+    author: kittenbfive
+    catch_exceptions: 'True'
     category: '[GRC Hier Blocks]'
     cmake_opt: ''
     comment: ''
@@ -39,7 +40,7 @@ blocks:
     gui_hint: (2,0,1,3)
     label: Demodulator Gain
     min_len: '100'
-    orient: Qt.Horizontal
+    orient: QtCore.Qt.Horizontal
     rangeType: float
     start: '1'
     step: '0.1'
@@ -96,7 +97,7 @@ blocks:
     gui_hint: (0,1)
     label: nRF Channel
     min_len: '0'
-    orient: Qt.Horizontal
+    orient: QtCore.Qt.Horizontal
     rangeType: float
     start: '0'
     step: '1'
@@ -187,7 +188,7 @@ blocks:
     gui_hint: (4,1)
     label: Threshold High
     min_len: '100'
-    orient: Qt.Horizontal
+    orient: QtCore.Qt.Horizontal
     rangeType: float
     start: '0'
     step: '0.05'
@@ -208,7 +209,7 @@ blocks:
     gui_hint: (4,0)
     label: Threshold Low
     min_len: '100'
-    orient: Qt.Horizontal
+    orient: QtCore.Qt.Horizontal
     rangeType: float
     start: '-1'
     step: '0.05'
@@ -229,7 +230,7 @@ blocks:
     gui_hint: (3,0,1,3)
     label: Trigger (signal magnitude)
     min_len: '100'
-    orient: Qt.Horizontal
+    orient: QtCore.Qt.Horizontal
     rangeType: float
     start: '0'
     step: '0.01'
@@ -315,9 +316,12 @@ blocks:
   parameters:
     affinity: ''
     alias: ''
+    bias: '0'
     comment: ''
     maxoutbuf: '0'
     minoutbuf: '0'
+    scale: '1'
+    vlen: '1'
   states:
     bus_sink: false
     bus_source: false
@@ -399,7 +403,7 @@ blocks:
     samp_rate: samp_rate
     type: fir_filter_ccf
     width: lpf_tran_width
-    win: firdes.WIN_HAMMING
+    win: window.WIN_HAMMING
   states:
     bus_sink: false
     bus_source: false
@@ -444,7 +448,7 @@ blocks:
     ant7: ''
     ant8: ''
     ant9: ''
-    args: '""'
+    args: ''
     bb_gain0: '20'
     bb_gain1: '20'
     bb_gain10: '20'
@@ -785,7 +789,7 @@ blocks:
     showports: 'False'
     showrf: 'True'
     type: complex
-    wintype: firdes.WIN_BLACKMAN_hARRIS
+    wintype: window.WIN_BLACKMAN_hARRIS
   states:
     bus_sink: false
     bus_source: false
@@ -907,3 +911,4 @@ connections:
 
 metadata:
   file_format: 1
+  grc_version: 3.10.12.0
