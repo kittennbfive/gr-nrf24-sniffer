@@ -8,13 +8,17 @@
 #include <getopt.h>
 #include <ctype.h>
 #include <signal.h>
+#include <unistd.h>
+#include <errno.h>
 
 /*
-nrf-decoder version 1 (c) 2022 by kittennbfive
+nrf-decoder version 2
+
+Copyright (c) 2022-2026 by kittennbfive
 
 https://github.com/kittennbfive/
 
-see README.md
+Please read the fine manual.
 
 AGPLv3+ and NO WARRANTY!
 */
@@ -87,6 +91,8 @@ static bool sz_ack_payload_bytes_specified=false;
 #define BUF_CRC_MAX (SZ_ADDR_BYTES_MAX+NB_DATA_BYTES_MAX+2) //2 bytes for PCF
 #define MAX_PACKET_LENGTH_SAMPLES (8*(1+SZ_ADDR_BYTES_MAX+2+NB_DATA_BYTES_MAX+2)*samples_per_bit) //1 for preamble, 2 for PCF, 2 for CRC
 
+//following two defines can be tweaked if needed
+#define FIFO_PATH_NAME "/tmp/fifo_grc" //keep synchronized with GNU Radio project!
 #define SZ_BUFFER_SAMPLES (4*MAX_PACKET_LENGTH_SAMPLES) //4 randomly choosen, seems to work fine
 
 //internal stuff
@@ -131,7 +137,7 @@ static uint32_t nb_samples=0;
 static uint32_t write_index=0;
 static uint32_t read_index=0;
 
-void ringbuffer_put_sample(const uint8_t byte)
+static void ringbuffer_put_sample(const uint8_t byte)
 {
 	if(nb_samples++==SZ_BUFFER_SAMPLES)
 		errx(1, "ring buffer overflow");
@@ -139,7 +145,7 @@ void ringbuffer_put_sample(const uint8_t byte)
 	write_index%=SZ_BUFFER_SAMPLES;	
 }
 
-uint8_t ringbuffer_get_sample_at_pos(const uint32_t pos)
+static uint8_t ringbuffer_get_sample_at_pos(const uint32_t pos)
 {
 	if(pos>nb_samples)
 		errx(1, "ring buffer out of range (requested position %u but only %u samples in buffer)", pos, nb_samples);
@@ -148,7 +154,7 @@ uint8_t ringbuffer_get_sample_at_pos(const uint32_t pos)
 	return byte;
 }
 
-void ringbuffer_remove_samples(const uint32_t nb)
+static void ringbuffer_remove_samples(const uint32_t nb)
 {
 	if(nb>nb_samples)
 		errx(1, "ring buffer underflow (requested removal of %u samples but only %u in buffer)", nb, nb_samples);
@@ -157,7 +163,7 @@ void ringbuffer_remove_samples(const uint32_t nb)
 	nb_samples-=nb;
 }
 
-uint8_t get_bits(const uint32_t startpos_samples, const uint8_t nb_bits)
+static uint8_t get_bits(const uint32_t startpos_samples, const uint8_t nb_bits)
 {
 	if(nb_bits>8)
 		errx(1, "get_bits: nb_bits must be <=8");
@@ -175,44 +181,34 @@ uint8_t get_bits(const uint32_t startpos_samples, const uint8_t nb_bits)
 	return byte;
 }
 
-uint8_t get_byte(const uint32_t startpos_samples)
+static uint8_t get_byte(const uint32_t startpos_samples)
 {
 	return get_bits(startpos_samples, 8);
 }
 
-bool check_for_preamble(void) //preamble can be 0x55 or 0xAA depending on address
+static bool check_for_preamble(void) //preamble can be 0x55 or 0xAA depending on address
 {
 	uint8_t i;
 	bool bit;
 	
-	if(ringbuffer_get_sample_at_pos(0)==0)
+	bit=ringbuffer_get_sample_at_pos(0);
+
+	for(i=0; i<8; i++, bit=!bit)
 	{
-		for(i=0, bit=0; i<8; i++, bit=!bit)
-		{
-			if(ringbuffer_get_sample_at_pos(samples_per_bit/2+i*samples_per_bit)!=bit)
-				return false;
-		}
-		return true;
+		if(ringbuffer_get_sample_at_pos(samples_per_bit/2+i*samples_per_bit)!=bit)
+			return false;
 	}
-	else 
-	{
-		for(i=0, bit=1; i<8; i++, bit=!bit)
-		{
-			if(ringbuffer_get_sample_at_pos(samples_per_bit/2+i*samples_per_bit)!=bit)
-				return false;
-		}
-		return true;
-	}
+	return true;
 }
 
-void read_bytes(const uint32_t startpos_samples, const uint8_t nb, uint8_t * const dst)
+static void read_bytes(const uint32_t startpos_samples, const uint8_t nb, uint8_t * const dst)
 {
 	uint8_t i;
 	for(i=0; i<nb; i++)
 		dst[i]=get_byte(startpos_samples+BYTES_TO_SAMPLES(i));
 }
 
-uint8_t calc_crc8(uint8_t const * const data, const uint16_t sz_bits)
+static uint8_t calc_crc8(uint8_t const * const data, const uint16_t sz_bits)
 {
 	uint8_t crc=0xff;
 	uint8_t i;
@@ -245,7 +241,7 @@ uint8_t calc_crc8(uint8_t const * const data, const uint16_t sz_bits)
 	return crc;
 }
 
-uint16_t calc_crc16(uint8_t const * const data, const uint16_t sz_bits)
+static uint16_t calc_crc16(uint8_t const * const data, const uint16_t sz_bits)
 {
 	uint16_t crc=0xffff;
 	uint8_t i;
@@ -277,7 +273,7 @@ uint16_t calc_crc16(uint8_t const * const data, const uint16_t sz_bits)
 	return crc;
 }
 
-void read_pcf(uint32_t startpos_samples, nRF24_packet_t * const packet) //packet control field
+static void read_pcf(uint32_t startpos_samples, nRF24_packet_t * const packet) //packet control field
 {
 	packet->pcf.payload_length=get_bits(startpos_samples, 6);
 	startpos_samples+=BITS_TO_SAMPLES(6);
@@ -287,7 +283,7 @@ void read_pcf(uint32_t startpos_samples, nRF24_packet_t * const packet) //packet
 	startpos_samples+=BITS_TO_SAMPLES(1);
 }
 
-uint16_t pack_for_crc(uint8_t * const buf, nRF24_packet_t const * const packet, const uint8_t length_payload)
+static uint16_t pack_for_crc(uint8_t * const buf, nRF24_packet_t const * const packet, const uint8_t length_payload)
 {
 	uint8_t i,j;
 	
@@ -329,7 +325,7 @@ uint16_t pack_for_crc(uint8_t * const buf, nRF24_packet_t const * const packet, 
 	return bits_total;
 }
 
-void disp_packet_verbose(nRF24_packet_t const * const packet, struct timeval const * const timestamp, const packettype_t packettype, const bool is_retransmit)
+static void disp_packet_verbose(nRF24_packet_t const * const packet, struct timeval const * const timestamp, const packettype_t packettype, const bool is_retransmit)
 {
 	uint8_t i;
 	
@@ -368,7 +364,7 @@ void disp_packet_verbose(nRF24_packet_t const * const packet, struct timeval con
 	fprintf(stderr, "\n");
 }
 
-void update_summary(const bool show_retransmits, const bool is_retransmit) //add stuff?
+static void update_summary(const bool show_retransmits, const bool is_retransmit) //add stuff?
 {
 	static uint64_t nb_valid_packets=0;
 	static uint64_t nb_retransmits=0;
@@ -383,7 +379,7 @@ void update_summary(const bool show_retransmits, const bool is_retransmit) //add
 		fprintf(stderr, "nRF24 %lu packets\r", nb_valid_packets);
 }
 
-bool make_packet_from_samples(uint32_t startpos_samples, nRF24_packet_t * const packet, payloadlengthmode_t mode, const uint8_t sz_payload, uint16_t * const packetsize_samples)
+static bool make_packet_from_samples(uint32_t startpos_samples, nRF24_packet_t * const packet, payloadlengthmode_t mode, const uint8_t sz_payload, uint16_t * const packetsize_samples)
 {
 	read_bytes(startpos_samples, sz_addr_bytes, packet->addr);
 	startpos_samples+=BYTES_TO_SAMPLES(sz_addr_bytes);
@@ -432,7 +428,7 @@ bool make_packet_from_samples(uint32_t startpos_samples, nRF24_packet_t * const 
 	return true;
 }
 
-bool check_display_packet(uint16_t * const packetsize_samples)
+static bool check_display_packet(uint16_t * const packetsize_samples)
 {
 	nRF24_packet_t packet;
 	
@@ -550,14 +546,14 @@ bool check_display_packet(uint16_t * const packetsize_samples)
 	}
 }
 
-void print_usage_and_exit(void)
+static void print_usage_and_exit(void)
 {
-	fprintf(stderr, "usage: cat $pipe_or_file | ./nrf-decoder [options]\n");
+	fprintf(stderr, "usage: \"./nrf-decoder [options]\" or \"cat $file | ./nrf-decoder [options]\" (check README)\n");
 	fprintf(stderr, "options:\n\t--spb $samples_per_bit (mandatory)\n\t--sz-addr $sz_addr_bytes (mandatory)\n\t--sz-payload $sz_payload_bytes\n\t--sz-ack-payload $sz_ack_payload_bytes\n\t--dyn-lengths\n\t--disp [verbose|retransmits|none]\n\t--dump-payload [data|ack|all]\n\t--mode-compatibility\n\t--crc16\n\t--filter-addr $addr_in_hex\n");
 	exit(0);
 }
 
-void parse_dispmode(char const * const str)
+static void parse_dispmode(char const * const str)
 {
 	if(!strcmp(str, "verbose"))
 		dispmode=DISP_VERBOSE;
@@ -569,7 +565,7 @@ void parse_dispmode(char const * const str)
 		errx(1, "invalid argument for --disp");
 }
 
-void parse_dumpmode(char const * const str)
+static void parse_dumpmode(char const * const str)
 {
 	if(!strcmp(str, "data"))
 		dumpmode=DUMP_PACKET_PAYLOAD;
@@ -581,7 +577,7 @@ void parse_dumpmode(char const * const str)
 		errx(1, "invalid argument for --dump-payload");
 }
 
-uint8_t parse_hex_byte(char const * const str)
+static uint8_t parse_hex_byte(char const * const str)
 {
 	uint8_t ret;
 	
@@ -598,7 +594,7 @@ uint8_t parse_hex_byte(char const * const str)
 	return ret;
 }
 
-void parse_filter_addr(char const * const str, uint8_t * const sz_parsed_addr)
+static void parse_filter_addr(char const * const str, uint8_t * const sz_parsed_addr)
 {
 	char const * ptr=str;
 	if(!memcmp(ptr,"0x",2))
@@ -656,10 +652,11 @@ int main(int argc, char **argv)
 	int opt;
 	
 	uint8_t sz_parsed_addr;
+	bool sz_parsed_addr_provided=false;
 	
 	bool only_print_version=false;
 	
-	fprintf(stderr, "This is nrf-decoder version 1 (c) 2022 by kittennbfive.\n");
+	fprintf(stderr, "This is nrf-decoder version 2 Copyright (c) 2022-2026 by kittennbfive.\n");
 	fprintf(stderr, "This tool is experimental and provided under AGPLv3+ WITHOUT ANY WARRANTY!\n\n");
 	
 	while((opt=getopt_long(argc, argv, "", optiontable, &optionindex))!=-1)
@@ -676,12 +673,12 @@ int main(int argc, char **argv)
 			case 6: crcmode=CRC_TWO_BYTES; break;
 			case 7: parse_dispmode(optarg); break;
 			case 8: parse_dumpmode(optarg); break;
-			case 9: filtermode=FILTER_BY_ADDRESS; parse_filter_addr(optarg, &sz_parsed_addr); break;
+			case 9: filtermode=FILTER_BY_ADDRESS; parse_filter_addr(optarg, &sz_parsed_addr); sz_parsed_addr_provided=true; break;
 			
 			case 100: only_print_version=true; break;
 			case 101: print_usage_and_exit(); break;
 			
-			default: errx(1, "don't know how to handle %d returned by getopt_long", opt); break;
+			default: errx(1, "don't know how to handle %d returned by getopt_long - this is a bug", opt); break;
 		}
 	}
 	
@@ -689,16 +686,16 @@ int main(int argc, char **argv)
 		return 0;
 	
 	if(samples_per_bit==0)
-		errx(1, "invalid value for or missing mandatory argument --spb");
+		errx(1, "invalid value (NaN?) or missing mandatory argument --spb");
 	
-	if(sz_addr_bytes==0)
-		errx(1, "invalid value for or missing mandatory argument --sz-addr");
+	if(sz_addr_bytes==0 || sz_addr_bytes>5)
+		errx(1, "invalid value (NaN?) or missing mandatory argument --sz-addr");
 	
-	if(sz_payload_bytes==0 && payloadlengthmode==PAYLOAD_FIXED_LENGTH)
-		errx(1, "invalid value for or missing mandatory argument --sz-payload if --dyn-lengths is not specified");
+	if((sz_payload_bytes==0 || sz_payload_bytes>32) && payloadlengthmode==PAYLOAD_FIXED_LENGTH)
+		errx(1, "invalid value (NaN?) or missing mandatory argument --sz-payload if --dyn-lengths is not specified");
 
 	if(!sz_ack_payload_bytes_specified && payloadlengthmode==PAYLOAD_FIXED_LENGTH && nrfmode==MODE_NORMAL)
-		errx(1, "invalid value for or missing mandatory argument --sz-ack-payload if --dyn-lengths is not specified in normal mode");
+		errx(1, "invalid value (NaN?) or missing mandatory argument --sz-ack-payload if --dyn-lengths is not specified in normal mode");
 
 	if(payloadlengthmode==PAYLOAD_DYNAMIC_LENGTH && sz_payload_bytes!=0)
 		warnx("--dyn-payload-length is set, ignoring --sz-payload\n");
@@ -706,8 +703,8 @@ int main(int argc, char **argv)
 	if(payloadlengthmode==PAYLOAD_DYNAMIC_LENGTH && sz_ack_payload_bytes!=0)
 		warnx("--dyn-payload-length is set, ignoring --sz-ack-payload\n");
 	
-	if(filtermode==FILTER_BY_ADDRESS && sz_addr_bytes!=sz_parsed_addr)
-		errx(1, "size missmatch between specified address length and specified address for filtering");
+	if(filtermode==FILTER_BY_ADDRESS && (!sz_parsed_addr_provided || sz_addr_bytes!=sz_parsed_addr))
+		errx(1, "size missmatch between specified address length and specified address for filtering or no address length provided");
 	
 	if((dumpmode==DUMP_PACKET_AND_ACK_PAYLOAD || dumpmode==DUMP_ACK_PAYLOAD) && nrfmode==MODE_COMPATIBILITY)
 		errx(1, "--dump-payload [ack|all] is incompatible with --mode-compatibility (ACK-packets can't have payload in this mode)");
@@ -720,15 +717,56 @@ int main(int argc, char **argv)
 
 	ringbuffer=malloc(SZ_BUFFER_SAMPLES);
 	if(!ringbuffer)
-		err(1, "malloc for ring buffer failed");
+		err(1, "malloc() for ring buffer failed");
 	
-	signal(SIGINT, &sigint);
+	struct sigaction sa;
+	memset(&sa, 0, sizeof(struct sigaction));
+	sa.sa_handler=&sigint;
+	if(sigaction(SIGINT, &sa, NULL))
+		err(1, "sigaction(SIGINT) failed");
+	
+	FILE * data_from;
+	bool msg_shown=false;
+	if(!isatty(STDIN_FILENO))
+	{
+		fprintf(stderr, "reading data from STDIN...\n");
+		data_from=stdin;
+	}
+	else
+	{
+		fprintf(stderr, "no pipe on input, trying to open FIFO %s ...\n", FIFO_PATH_NAME);
+		do
+		{
+			data_from=fopen(FIFO_PATH_NAME, "rb");
+			if(data_from==NULL && errno!=ENOENT)
+				err(1, "unable to open FIFO %s", FIFO_PATH_NAME);
+			else if(data_from==NULL && errno==ENOENT && !msg_shown)
+			{
+				fprintf(stderr, "waiting for FIFO %s to appear - please run GNU Radio or press Ctrl+C to abort\n", FIFO_PATH_NAME);
+				msg_shown=true;
+			}
+			usleep(1000*500);
+		}  while(data_from==NULL && run);
+		if(data_from)
+			fprintf(stderr, "reading data from FIFO %s - press Ctrl+C once done\n", FIFO_PATH_NAME);
+	}
+
+	int c;
 	
 	uint16_t packetsize_samples;
 
-	while(!feof(stdin) && run)
+	while(run)
 	{
-		ringbuffer_put_sample(fgetc(stdin));
+		c=fgetc(data_from);
+		if(c==EOF && !feof(data_from))
+			err(1, "fgetc() failed");
+		else if(c==EOF && data_from==stdin && feof(stdin))
+		{
+			run=false;
+			break;
+		}
+		
+		ringbuffer_put_sample(c);
 		
 		if(nb_samples>=MAX_PACKET_LENGTH_SAMPLES)
 		{
@@ -753,3 +791,4 @@ int main(int argc, char **argv)
 	
 	return 0;
 }
+
